@@ -1,0 +1,6 @@
+     classifier_names accuracy_test
+[1,] "123"            "97.83"      
+[2,] "average"        "22.3"       
+     time_train
+[1,] "99.87"   
+[2,] "3.45"    
