@@ -1,0 +1,132 @@
+---
+title: "NYCFlights13_ArikRascovsky"
+author: "ArikRascovsky"
+date: "April 13, 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(nycflights13)
+library(tidyverse)
+library(maps)
+data("flights")
+data("airports")
+
+flights <- flights %>% mutate(late=dep_delay>15)
+
+counts <- flights %>% group_by(dest, origin) %>% summarise(num_flights=n(), late_flights=sum(late, na.rm = T))
+
+counts$prop_delay <- with(counts, ifelse((late_flights/num_flights)>0.25, yes='red', no=ifelse((late_flights/num_flights)>=0.2, yes='orange', no=ifelse((late_flights/num_flights)>=0.15, yes='blue', no=ifelse((late_flights/num_flights)>=0.1, yes='purple', no='green')))))
+
+counts$orlong <- airports$lon[match(counts$origin, airports$faa)]
+counts$destlong <- airports$lon[match(counts$dest, airports$faa)]
+counts$orlat <- airports$lat[match(counts$origin, airports$faa)]
+counts$destlat <- airports$lat[match(counts$dest, airports$faa)]
+```
+2.
+
+The following graphic summarises the percentage of flights delayed from the three airports of NYC, broken by destination airport:
+
+```{r fig.width=12, fig.height=8}
+map('state')
+text(x=state.center$x, y=state.center$y, state.abb, cex=0.6)
+for (i in 1:nrow(counts)){
+  lines(x=c(counts$orlong[i], counts$destlong[i]), y=c(counts$orlat[i], counts$destlat[i]), col=counts$prop_delay[i])
+}
+legend('bottomright', col=c('red', 'orange', 'blue', 'purple', 'green'), legend=c('> 25%', '20% - 25%', '15% - 20%', '10% - 15%', '< 10%'), lwd = 1)
+title(main = '% of flight departures delayed > 15 minutes', sub = 'Origin: NYC Year: 2013')
+```
+
+```{r}
+flights <- flights %>% mutate(date=paste(month, day, year, sep = '-'))
+counts_byDay <- flights %>% group_by(date) %>% summarise(num_flights=n(), late_flights=sum(late, na.rm=T), late_mins=(sum(dep_delay, na.rm = T)))
+counts_byDay$date <- as.Date(counts_byDay$date, format='%m-%d-%Y')
+counts_byDay <- counts_byDay %>% arrange(date)
+
+counts_byDay_gathered <- counts_byDay %>% gather(c(num_flights, late_flights), key='countof', value='count')
+```
+
+The following graphic summarises flight volume and flights delayed, broken by day, and showing weekly cycles
+
+```{r fig.width=12, fig.height=8}
+ggplot(data = counts_byDay_gathered, aes(x=date, y=count, color = countof), color=c('red', 'blue')) + geom_line() + scale_color_discrete(limits=c('num_flights', 'late_flights'), labels=c("All Flights", "Late Flights (flights delayed by > 15 minutes")) + guides(color=guide_legend(title = NULL)) + theme(legend.position = 'top')
+```
+
+3.
+We can explore the possibility of departure delay being due to management issues, which can be assessed by checking if there is a difference between proportions of flights delayed to total flights between the 3 airports in NYC.
+
+```{r}
+counts_by_airport <- flights %>% group_by(dest, origin) %>% summarise(num_flights=n(), late_flights=sum(late, na.rm=T), late_minutes=sum(dep_delay, na.rm = T))
+
+propnum <- counts_by_airport %>% group_by(origin) %>% summarise(num_late=sum(late_flights), num_flights=sum(num_flights), late_mins=sum(late_minutes)) %>% mutate(propnumlate=num_late/num_flights)
+
+propnum_gathered <- propnum %>% gather(c(num_late, num_flights), key=count_of, value = number)
+ggplot(data = propnum_gathered, aes(x = origin, y = number, fill = count_of)) + geom_bar(stat='identity', position = 'dodge') + ggtitle('number of flights delayed, compared to total flights, by origin')
+```
+These bars don't tell us a lot. Yes, there are more delayed flights from EWR, but that airport also has more flights. We can get better information if we find out the proportions of late flights to the total number of flights in each airport
+
+```{r}
+propnum %>% select(origin, propnumlate)
+```
+
+This shows that 24% of all flights that took off from EWR were late in departure by at least 15 minutes compared to the 18% of LGA. This might be significant
+
+Another trend we can explore is, if there is any correlation between destination and number of delayed flights, i.e, do flights destined for a particular airport tend to be delayed more than others?
+
+```{r fig.width=12}
+propnum_dest <- counts_by_airport %>% group_by(dest) %>% summarise(num_late=sum(late_flights), num_flights=sum(num_flights), late_mins=sum(late_minutes)) %>% mutate(propnumlate=num_late/num_flights)
+
+propnum_dest_gathered <- propnum_dest %>% gather(c(num_late, num_flights), key=count_of, value = number)
+ggplot(data = propnum_dest_gathered, aes(x = dest, y = number, fill = count_of)) + geom_bar(stat='identity', position = 'dodge') + theme(axis.text.x = element_text(angle=90), legend.position = 'bottom') + ggtitle('number of flights delayed, compared to total flights, by destination')
+```
+
+Again, taking proportions:
+
+```{r}
+propnum_dest %>% select(dest, propnumlate) %>% arrange(desc(propnumlate))
+```
+
+The airport with the highest proportion of delayed flights to total number of flights has a proportion of 50%, compared to 10% of the lowest. This shows a significant difference in the proportions of delayed flights between destination airports.
+
+4.
+
+```{r}
+avgdelay_month <- counts_byDay %>% group_by(month = months(date)) %>% summarise(average_delay = mean(late_mins))
+
+# arranging months to make the graph look logical
+avgdelay_month$month <- factor(avgdelay_month$month, levels = c('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'))
+                               
+ggplot(avgdelay_month, aes(x = month, y = average_delay, group = 12)) + geom_line() + geom_point()
+
+ggplot(avgdelay_month, aes(x = month, y = average_delay)) + geom_bar(stat = 'identity')
+```
+
+These plots indicate a significant spike in flight delays in the months of June and July. Now this could be a random variation, and number of delays is not associated with months, which is our null hypothesis. The alternate hypothesis is that there is an association between the number of delays and the month, and it could be a traceable trend.
+
+We can try to identify if the alternate hypothesis is worth accepting, to be more accurate, if the null hypothesis can be rejected by simulating some data for dep_delay based on the null hypothesis, i.e. there is no connection between the month of the year and the departure delay. We can do this by randomly rearranging the departure delay times and plotting their aggregate times by month a few times to see if we can get a graphic similar to what we already have, i.e, having consecutive months with signifantly higher number of delayed departure minutes than the others. In that case, we will have to reject the alternate hypothesis and go with the null.
+
+```{r}
+simflights <- flights %>% select(date, dep_delay)
+for (i in 3:12) {
+	simflights[,i] <- sample(simflights$dep_delay, length(simflights$dep_delay)) }
+names(simflights)[3:12] <- rep(paste('sim', 1:10, sep = '_'))
+names(simflights)[2] <- 'actual_data'
+simflights_grouped <- simflights %>% group_by(date) %>% summarise_all(sum, na.rm = T)
+simflights_grouped$date <- as.Date(simflights_grouped$date, format = '%m-%d-%Y')
+simflights_grouped_month <- simflights_grouped %>% group_by(month = months(date)) %>% select(c(month, actual_data:sim_10)) %>% summarise_all(mean, na.rm = T)
+
+simflights_grouped_month$month <- factor(simflights_grouped_month$month, levels = c('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'))
+
+simflights_grouped_month_long <- simflights_grouped_month %>% gather(actual_data:sim_10, key = 'dataset', value = 'avg_delay')
+
+ggplot(data = simflights_grouped_month_long, aes(x = month, y = avg_delay)) + geom_bar(stat = 'identity') + facet_wrap('dataset')
+``` 
+These graphics clearly show that if the delays are random, we don't get a graphic that even closely resembles the one we get from the actual data, in any period of the year. Hence, we can deduce that delay in departure time is, indeed a seasonal trend.
